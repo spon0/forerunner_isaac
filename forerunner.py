@@ -19,20 +19,7 @@ import numpy as np
 
 from isaacsim import SimulationApp
 
-CONFIG = {
-    "width": 1280,
-    "height": 720,
-    "window_width": 1920,
-    "window_height": 1080,
-    "headless": False,
-}
-
 simulation_app = SimulationApp({'headless': False})
-simulation_app.set_setting("/app/useFabricSceneDelegate", True)
-simulation_app.set_setting("/app/usdrt/scene_delegate/enableProxyCubes", False)
-simulation_app.set_setting("/app/usdrt/scene_delegate/geometryStreaming/enabled", False)
-simulation_app.set_setting("/omnihydra/parallelHydraSprimSync", False)
-
 simulation_app.update()
 
 import omni.usd
@@ -57,7 +44,7 @@ from earth import EarthScene
 #usdContext.open_stage(cesiumTilesetPath)
 
 # Create a sim world
-world = EarthScene(stage_units_in_meters=1.0, physics_dt=1/30, rendering_dt=1/30, backend="warp", device="cuda")
+world = EarthScene(stage_units_in_meters=1.0, physics_dt=1/60, rendering_dt=1/60, backend="warp", device="cuda")
 
 # Reset world (this sets simulation to 'playing' state)
 world.reset()

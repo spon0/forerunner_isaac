@@ -20,6 +20,13 @@ from skyfield import framelib
 
 import warp as wp
 
+from cesium.usd.plugins.CesiumUsdSchemas import (
+    GlobeAnchorAPI as CesiumGlobeAnchorAPI
+)
+from cesium.omniverse.extension import (
+    CesiumOmniverseExtension as CesiumAPI
+)
+
 class EarthScene(World):
 
     wgs84semiMajor = 6378137.0 / 1000.
@@ -38,38 +45,55 @@ class EarthScene(World):
         self.simTime : Time = None # type: ignore
 
         self.timestep = 0
-        self.speed = 50.0
-        self.timestepsPerUpdate = 20
+        self.speed = 100.0
+        self.timestepsPerUpdate = 10
+
+        # Locate our globe asset
+        usd_file = "00_quickstart.usda" #"earth.usd" #"00_quickstart.usda"
+        script_path = os.path.dirname(os.path.abspath(__file__))
+        usd_path = os.path.join(script_path, usd_file)
 
         # Get the stage
         stage = omni.usd.get_context().get_stage()
+        #stage = omni.usd.get_context().open_stage(url=usd_path)
+
+        # # Create a CesiumGeoreference prim
+        # georeference_prim_path = "/CesiumGeoreference"
+        # georeference_prim = stage.DefinePrim(georeference_prim_path, "CesiumGeoreference")
+
+        # # Add a Cesium World Terrain tileset (or your own custom tileset)
+        # tileset_prim_path = "/CesiumGeoreference/CesiumWorldTerrain"
+        # tileset_prim = stage.DefinePrim(tileset_prim_path, "CesiumTileset")
+        # tileset_prim.GetAttribute("cesium:source").Set(2) # Or your Ion Asset ID
+
+        # # Set the origin of the georeference (e.g., to a specific latitude, longitude, and height)
+        # # This example sets the origin to a location near the default Cesium World Terrain origin.
+        # georeference_prim.GetAttribute("cesium:origin:latitude").Set(40.0)
+        # georeference_prim.GetAttribute("cesium:origin:longitude").Set(-105.0)
+        # georeference_prim.GetAttribute("cesium:origin:height").Set(0.0)
+
 
         # scaling factor determined to be 20 based on original earth.usd having a bounding box of:
         # [(-10.003646850585938, -10.021764755249023, -10.020329475402832)...(10.003656387329102, 10.02176570892334, 10.020326614379883)]
         scalingFactor = 10.02
 
-        usd_file = "earth.usd"
-        script_path = os.path.dirname(os.path.abspath(__file__))
-        usd_path = os.path.join(script_path, usd_file)
-
-        
         #omni.usd.get_context().open_stage(usd_path)
 
-        omni.kit.commands.execute(
-            "IsaacSimSpawnPrim",
-            usd_path=usd_path,
-            prim_path="/World/earth",
-            translation=(0, 0, 0),
-            rotation=(0.0, 0.0, 0.0, 0.0),
-        )
+        # omni.kit.commands.execute(
+        #     "IsaacSimSpawnPrim",
+        #     usd_path=usd_path,
+        #     prim_path="/World/earth",
+        #     translation=(0, 0, 0),
+        #     rotation=(0.0, 0.0, 0.0, 0.0),
+        # )
 
-        omni.kit.commands.execute(
-            "IsaacSimScalePrim",
-            prim_path="/World/earth",
-            scale=(EarthScene.wgs84semiMajor / scalingFactor, EarthScene.wgs84semiMajor / scalingFactor, EarthScene.wgs84semiMinor / scalingFactor)
-        )
-        success = stage.GetPrimAtPath("/World/earth").GetAttribute("xformOp:orient").Set(Gf.Quatd(0.5, 0.5, 0.5, 0.5), 0)
-        print("Changed the rotation of the prim: ", success)
+        # omni.kit.commands.execute(
+        #     "IsaacSimScalePrim",
+        #     prim_path="/World/earth",
+        #     scale=(EarthScene.wgs84semiMajor / scalingFactor, EarthScene.wgs84semiMajor / scalingFactor, EarthScene.wgs84semiMinor / scalingFactor)
+        # )
+        # success = stage.GetPrimAtPath("/World/earth").GetAttribute("xformOp:orient").Set(Gf.Quatd(0.5, 0.5, 0.5, 0.5), 0)
+        # print("Changed the rotation of the prim: ", success)
 
         # Create the sun
 
@@ -173,7 +197,7 @@ class EarthScene(World):
 
         protoPath = "/World/Prototypes/Sphere"
         protoPrim = UsdGeom.Sphere.Define(omni.usd.get_context().get_stage(), protoPath)
-        protoPrim.GetRadiusAttr().Set(15)
+        protoPrim.GetRadiusAttr().Set(10)
 
         ptInstancePath = "/World/satellites"
         self.satellitesPrim = UsdGeom.PointInstancer.Define(omni.usd.get_context().get_stage(), ptInstancePath)
