@@ -25,6 +25,13 @@ class EarthScene(World):
     wgs84semiMajor = 6378137.0 / 1000.
     wgs84semiMinor = 6356752.314245 / 1000.
 
+    SATTYPE_COLOR_MAPPING = {
+        'ROCKET BODY': Gf.Vec3f(1, 0, 1),
+        'DEBRIS': Gf.Vec3f(0, 1, 1),
+        'PAYLOAD': Gf.Vec3f(0, 1, 0),
+        'UNKNOWN': Gf.Vec3f(1, 0, 0)
+    }
+
     def __init__(self, physics_dt: float | None = None, rendering_dt: float | None = None, stage_units_in_meters: float | None = None, physics_prim_path: str = "/physicsScene", sim_params: dict = None, set_defaults: bool = True, backend: str = "numpy", device: str | None = None) -> None:
         super().__init__(physics_dt, rendering_dt, stage_units_in_meters, physics_prim_path, sim_params, set_defaults, backend, device)
 
@@ -38,8 +45,8 @@ class EarthScene(World):
         self.simTime : Time = None # type: ignore
 
         self.timestep = 0
-        self.speed = 50.0
-        self.timestepsPerUpdate = 20
+        self.speed = 25.0
+        self.timestepsPerUpdate = 50
 
         # Get the stage
         stage = omni.usd.get_context().get_stage()
@@ -100,6 +107,13 @@ class EarthScene(World):
         self.satPositions : np.ndarray = None
         self.satVelocities : np.ndarray = None
 
+        # Define the prim path for the Dome Light
+        domeLightPrimPath = Sdf.Path("/World/DomeLight")
+        # Create the Dome Light prim
+        domeLight = UsdLux.DomeLight.Define(stage, domeLightPrimPath)
+        # Set attributes for the Dome Light (optional)
+        # Example: Set intensity
+        domeLight.CreateIntensityAttr(10)
 
         # bb = omni.usd.get_context().compute_path_world_bounding_box(usd_path)
         # print(bb)
@@ -138,7 +152,41 @@ class EarthScene(World):
 
         return super().step(render, step_sim)
 
-    def loadSatellites(self, groups : list[tuple[str, list]], maxDaysOld : float = 7.0):
+    def loadSpaceTrack(self, maxDaysOld: float=7.0):
+
+        import requests
+        # d:\Projects\Space Interactions\Omniverse Forerunner\kit\python\Lib\datetime.py is overriding the datetime stdlib
+        import datetime
+
+        now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+        start = now - datetime.timedelta(days=maxDaysOld)
+        end = now
+
+        # Hardcoded for prototyping - TODO
+        url = f"http://127.0.0.1:5000/get_tles_between?aDate={start.isoformat()}&bDate={end.isoformat()}"
+        response = requests.get(url)
+
+        if response.status_code == 200:
+
+            tles = json.loads(response.text)
+            print("Received", len(tles), "TLEs")
+
+            ts = load.timescale()
+            for tle in tles:
+                sat = EarthSatellite(line1=tle['TLE_LINE1'], line2=tle['TLE_LINE2'], name=tle['OBJECT_NAME'], ts=ts)
+                sat.color = EarthScene.SATTYPE_COLOR_MAPPING[tle['OBJECT_TYPE']]
+                geocentric = sat.at(self.simEpoch)
+                sat.pos = geocentric.xyz.km
+                sat.vel = geocentric.velocity.km_per_s * self.speed
+                self.satellites.append(sat)
+
+        else:
+
+            print(f"Failed to reach {url}")
+            print(response.reason)
+            return
+
+    def loadCelesTrack(self, groups : list[tuple[str, list]], maxDaysOld : float = 7.0):
 
         sscs = set()
 
@@ -171,6 +219,7 @@ class EarthScene(World):
 
                 self.satellites.extend(satGroup)
 
+    def initializeSatellitesGeoms(self):
         protoPath = "/World/Prototypes/Sphere"
         protoPrim = UsdGeom.Sphere.Define(omni.usd.get_context().get_stage(), protoPath)
         protoPrim.GetRadiusAttr().Set(15)
@@ -178,6 +227,8 @@ class EarthScene(World):
         ptInstancePath = "/World/satellites"
         self.satellitesPrim = UsdGeom.PointInstancer.Define(omni.usd.get_context().get_stage(), ptInstancePath)
         self.satellitesPrim.GetPrototypesRel().AddTarget(protoPath)
+
+        if len(self.satellites) == 0: return
 
         positions = []
         velocities = []
@@ -208,6 +259,7 @@ class EarthScene(World):
         self.satPositions = np.array(positions)
         self.satVelocities = np.array(velocities)
 
+        # Assign timestep for SGP4 update call
         for sat in self.satellites:
             sat.updateIdx = np.random.randint(self.timestepsPerUpdate) # type: ignore
 

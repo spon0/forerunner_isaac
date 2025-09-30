@@ -61,15 +61,18 @@ world = EarthScene(stage_units_in_meters=1.0, physics_dt=1/30, rendering_dt=1/30
 
 # Reset world (this sets simulation to 'playing' state)
 world.reset()
-groups = [
-        ("cubesat",     Gf.Vec3f(1, 0, 0)),
-        ("gnss",        Gf.Vec3f(0, 1, 0)),
-        ("geo",         Gf.Vec3f(1, 1, 0)),
-        ("starlink",    Gf.Vec3f(48/255, 1, 1)),
-        ("iridium-NEXT",    Gf.Vec3f(1, 0, 1)), 
-        #("active", Gf.Vec3f(48/255, 1, 1))    
-    ]
-world.loadSatellites(groups)
+# groups = [
+#         ("cubesat",     Gf.Vec3f(1, 0, 0)),
+#         ("gnss",        Gf.Vec3f(0, 1, 0)),
+#         ("geo",         Gf.Vec3f(1, 1, 0)),
+#         ("starlink",    Gf.Vec3f(48/255, 1, 1)),
+#         ("iridium-NEXT",    Gf.Vec3f(1, 0, 1)), 
+#         #("active", Gf.Vec3f(48/255, 1, 1))    
+#     ]
+# world.loadSatellites(groups)
+
+world.loadSpaceTrack(7.0)
+world.initializeSatellitesGeoms()
 
 cameraDistance = EarthScene.wgs84semiMajor * 5
 
