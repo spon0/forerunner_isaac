@@ -42,25 +42,18 @@ import isaacsim.core.utils.math as math_utils
 import isaacsim.core.utils.prims as prim_utils
 import omni.kit.commands
 from isaacsim.core.utils.viewports import set_camera_view
-
 from isaacsim.gui.components import Frame, Button, StringField, TextBlock
-
 
 import warp as wp
 
-print(wp.__version__)
-
 from earth import EarthScene
 
-#usdContext = omni.usd.get_context()
-#cesiumTilesetPath = "C:\\isaac-sim4_5\\standalone_examples\\Forerunner\\CesiumTilesets.usd"
-#usdContext.open_stage(cesiumTilesetPath)
-
 # Create a sim world
-world = EarthScene(stage_units_in_meters=1.0, physics_dt=1/30, rendering_dt=1/30, backend="warp", device="cuda")
+world = EarthScene(stage_units_in_meters=1.0, physics_dt=1/60, rendering_dt=1/60, backend="warp", device="cuda")
 
 # Reset world (this sets simulation to 'playing' state)
 world.reset()
+
 # groups = [
 #         ("cubesat",     Gf.Vec3f(1, 0, 0)),
 #         ("gnss",        Gf.Vec3f(0, 1, 0)),
@@ -71,12 +64,7 @@ world.reset()
 #     ]
 # world.loadSatellites(groups)
 
-world.loadSpaceTrack(7.0)
-world.initializeSatellitesGeoms()
 
-cameraDistance = EarthScene.wgs84semiMajor * 5
-
-world.initializeCamera(cameraDistance)
 
 import omni.ui as ui
 window = ui.Window("Viewport")

@@ -6,6 +6,7 @@ import math
 import omni.usd
 import omni.kit.commands
 from omni.isaac.core import World
+from isaacsim.sensors.camera import Camera
 # from omni.isaac.core.objects import VisualSphere
 # from isaacsim.core.api.objects import VisualSphere
 # from isaacsim.core.prims import GeometryPrim, SdfShapePrim
@@ -13,7 +14,7 @@ import isaacsim.core.utils.prims as prim_utils
 # from isaacsim.core.prims import XFormPrim
 from isaacsim.core.utils.viewports import set_camera_view
 from omni.physx.scripts import physicsUtils
-from pxr import Sdf, UsdLux, UsdGeom, Gf, UsdPhysics
+from pxr import Sdf, UsdLux, UsdGeom, Gf, UsdPhysics, Vt
 
 from skyfield.api import EarthSatellite, load, Timescale, Time, Distance
 from skyfield import framelib
@@ -59,7 +60,6 @@ class EarthScene(World):
         script_path = os.path.dirname(os.path.abspath(__file__))
         usd_path = os.path.join(script_path, usd_file)
 
-        
         #omni.usd.get_context().open_stage(usd_path)
 
         omni.kit.commands.execute(
@@ -106,6 +106,9 @@ class EarthScene(World):
 
         self.satPositions : np.ndarray = None
         self.satVelocities : np.ndarray = None
+        self.satScales : np.ndarray = None
+        self.cameraPrim : Camera = None
+        self.satDistanceScaler : float = 0.00007
 
         # Define the prim path for the Dome Light
         domeLightPrimPath = Sdf.Path("/World/DomeLight")
@@ -117,6 +120,18 @@ class EarthScene(World):
 
         # bb = omni.usd.get_context().compute_path_world_bounding_box(usd_path)
         # print(bb)
+        cameraDistance = EarthScene.wgs84semiMajor * 5
+
+        self.initializeCamera(cameraDistance)
+        self.loadSpaceTrack(7.0)
+        self.initializeSatellitesGeoms()
+
+    def getCameraPosition(self) -> wp.vec3:
+
+        transformMat = omni.usd.get_world_transform_matrix(self.stage.GetPrimAtPath("/OmniverseKit_Persp"))
+        pos = transformMat.ExtractTranslation()
+        
+        return wp.vec3(pos[0], pos[1], pos[2])
 
     def step(self, render: bool = True, step_sim: bool = True) -> None:
 
@@ -126,10 +141,11 @@ class EarthScene(World):
         if len(self.satellites) > 0:
             # Update any pos/vel for whose turn it is
             for i, sat in enumerate(self.satellites):
-                if self.timestep % self.timestepsPerUpdate == sat.updateIdx:
+                if self.timestep % self.timestepsPerUpdate == sat.updateIdx:                
                     geocentric = sat.at(self.simTime)
                     self.satPositions[i,:] = geocentric.xyz.km
                     self.satVelocities[i, :] = geocentric.velocity.km_per_s * self.speed
+
 
             # Get dimension for warp kernel
             n = len(self.satellites)  
@@ -139,10 +155,18 @@ class EarthScene(World):
             s = self.get_physics_dt()
             out = wp.empty(shape=n, dtype=wp.vec3, device="cuda")
 
+            # Position calc
             wp.launch(sgp4kernel, dim=n, inputs=[pos, vel, s, out], device="cuda")
 
             self.satPositions = out.numpy()
             self.satellitesPrim.GetPositionsAttr().Set(self.satPositions)
+
+            # Scale calc
+            scalesOut = wp.empty(shape=n, dtype=wp.vec3, device="cuda")
+
+            wp.launch(cameraDistKernel, dim=n, inputs=[pos, self.getCameraPosition(), self.satDistanceScaler, scalesOut], device="cuda")
+            self.satScales = scalesOut.numpy()
+            self.satellitesPrim.GetScalesAttr().Set(self.satScales)
 
         # Update sun position
         sunPos = self.getSunPosition(self.simTime)
@@ -233,7 +257,6 @@ class EarthScene(World):
         positions = []
         velocities = []
         oris = []
-        scales = []
         indices = []
         colors = []
         for sat in self.satellites:            
@@ -241,23 +264,29 @@ class EarthScene(World):
             positions.append(sat.pos)
             velocities.append(sat.vel)
             indices.append(0)
-            scale = np.clip(np.linalg.norm(sat.pos), EarthScene.wgs84semiMajor*2, EarthScene.wgs84semiMajor*6) / EarthScene.wgs84semiMajor
-            scales.append(Gf.Vec3f(scale,scale,scale))
             oris.append(Gf.Quath(1, 0, 0, 0))
             colors.append(sat.color)
 
+        self.satPositions = np.array(positions)
+        self.satVelocities = np.array(velocities)
+
+        # Get dimension for warp kernel
+        n = len(self.satellites)  
+        # Pack all pos
+        pos = wp.from_numpy(self.satPositions, dtype=wp.vec3, device="cuda")        
+        out = wp.empty(shape=n, dtype=wp.vec3, device="cuda")
+
+        wp.launch(cameraDistKernel, dim=n, inputs=[pos, self.getCameraPosition(), self.satDistanceScaler, out], device="cuda")
+        self.satScales = out.numpy()
         self.satellitesPrim.GetPositionsAttr().Set(positions)
         self.satellitesPrim.GetOrientationsAttr().Set(oris)
-        self.satellitesPrim.GetScalesAttr().Set(scales)
+        self.satellitesPrim.GetScalesAttr().Set(self.satScales)
         self.satellitesPrim.GetProtoIndicesAttr().Set(indices)
         primvarApi = UsdGeom.PrimvarsAPI(self.satellitesPrim)
         diffuse_color_primvar = primvarApi.CreatePrimvar(
             "primvars:displayColor", Sdf.ValueTypeNames.Color3fArray, UsdGeom.Tokens.varying
         )
         diffuse_color_primvar.Set(colors)
-
-        self.satPositions = np.array(positions)
-        self.satVelocities = np.array(velocities)
 
         # Assign timestep for SGP4 update call
         for sat in self.satellites:
@@ -266,11 +295,9 @@ class EarthScene(World):
     def initializeCamera(self, distance):
         prim_path = "/OmniverseKit_Persp"
 
-        from isaacsim.sensors.camera import Camera
-
-        camera = Camera(prim_path=prim_path)
-        camera.set_clipping_range(100.0, EarthScene.wgs84semiMajor * 50)
-
+        self.cameraPrim = Camera(prim_path=prim_path)
+        self.cameraPrim.set_clipping_range(100.0, EarthScene.wgs84semiMajor * 50)
+        
         angle = 0
         base = [1, 0, 0]
         x = base[0] * math.cos(angle) - base[1] * math.sin(angle)
@@ -332,8 +359,19 @@ class EarthScene(World):
         return Gf.Vec3d(v[0], v[1], v[2])
     
 @wp.kernel
-def sgp4kernel(pos: wp.array(dtype=wp.vec3), vel: wp.array(dtype=wp.vec3), s: float, out: wp.array(dtype=wp.vec3)):
+def sgp4kernel(pos: wp.array(dtype=wp.vec3), vel: wp.array(dtype=wp.vec3), s: float, out: wp.array(dtype=wp.vec3)): # type: ignore
     tid = wp.tid()
     x = pos[tid]
     v = vel[tid]
     out[tid] = x + v * s
+
+@wp.kernel
+def cameraDistKernel(pos: wp.array(dtype=wp.vec3), camPos: wp.vec3, s: float, out: wp.array(dtype=wp.vec3)): # type: ignore
+    tid = wp.tid()
+    x = pos[tid]    
+    dx = x[0] - camPos[0]
+    dy = x[1] - camPos[1]
+    dz = x[2] - camPos[2]
+    dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+    scale = dist * s
+    out[tid] = wp.vec3(scale, scale, scale)
