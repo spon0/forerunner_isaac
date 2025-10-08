@@ -3,6 +3,8 @@ import json
 import numpy as np
 import math
 
+import urllib3
+
 import omni.usd
 import omni.kit.commands
 from omni.isaac.core import World
@@ -108,7 +110,7 @@ class EarthScene(World):
         self.satVelocities : np.ndarray = None
         self.satScales : np.ndarray = None
         self.cameraPrim : Camera = None
-        self.satDistanceScaler : float = 0.00007
+        self.satDistanceScaler : float = 0.00012
 
         # Define the prim path for the Dome Light
         domeLightPrimPath = Sdf.Path("/World/DomeLight")
@@ -123,7 +125,7 @@ class EarthScene(World):
         cameraDistance = EarthScene.wgs84semiMajor * 5
 
         self.initializeCamera(cameraDistance)
-        self.loadSpaceTrack(7.0)
+        self.loadSpaceTrack(30.0)
         self.initializeSatellitesGeoms()
 
     def getCameraPosition(self) -> wp.vec3:
@@ -185,30 +187,35 @@ class EarthScene(World):
         now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
         start = now - datetime.timedelta(days=maxDaysOld)
         end = now
+        tles = []
+        try:
+            # Hardcoded for prototyping - TODO
+            url = f"http://127.0.0.1:5000/get_tles_between?aDate={start.isoformat()}&bDate={end.isoformat()}"
+            response = requests.get(url)
 
-        # Hardcoded for prototyping - TODO
-        url = f"http://127.0.0.1:5000/get_tles_between?aDate={start.isoformat()}&bDate={end.isoformat()}"
-        response = requests.get(url)
+            if response.status_code == 200:
 
-        if response.status_code == 200:
+                tles = json.loads(response.text)
 
-            tles = json.loads(response.text)
-            print("Received", len(tles), "TLEs")
+            else:
 
-            ts = load.timescale()
-            for tle in tles:
-                sat = EarthSatellite(line1=tle['TLE_LINE1'], line2=tle['TLE_LINE2'], name=tle['OBJECT_NAME'], ts=ts)
-                sat.color = EarthScene.SATTYPE_COLOR_MAPPING[tle['OBJECT_TYPE']]
-                geocentric = sat.at(self.simEpoch)
-                sat.pos = geocentric.xyz.km
-                sat.vel = geocentric.velocity.km_per_s * self.speed
-                self.satellites.append(sat)
+                raise requests.exceptions.ConnectionError
+            
+        except requests.exceptions.ConnectionError:
+            print("localhost:5000 is offline, defaulting to backup.tle")
+            # Server is offline, default to backup.tle   
+            backupTles = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backup.tle')         
+            tles = json.load(open(backupTles))
 
-        else:
-
-            print(f"Failed to reach {url}")
-            print(response.reason)
-            return
+        print("Received", len(tles), "TLEs")
+        ts = load.timescale()
+        for tle in tles:
+            sat = EarthSatellite(line1=tle['TLE_LINE1'], line2=tle['TLE_LINE2'], name=tle['OBJECT_NAME'], ts=ts)
+            sat.color = EarthScene.SATTYPE_COLOR_MAPPING[tle['OBJECT_TYPE']]
+            geocentric = sat.at(self.simEpoch)
+            sat.pos = geocentric.xyz.km
+            sat.vel = geocentric.velocity.km_per_s * self.speed
+            self.satellites.append(sat)
 
     def loadCelesTrack(self, groups : list[tuple[str, list]], maxDaysOld : float = 7.0):
 
