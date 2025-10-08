@@ -1,38 +1,17 @@
-# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+import os
 import json
 import math
 import numpy as np
 
 from isaacsim import SimulationApp
 
-CONFIG = {
-    "width": 1280,
-    "height": 720,
-    "window_width": 1920,
-    "window_height": 1080,
-    "headless": False,
-}
+FR_EXPERIENCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'forerunner.exp.kit')
 
-simulation_app = SimulationApp({'headless': False})
+simulation_app = SimulationApp(launch_config={'headless': False}, experience=FR_EXPERIENCE)
 simulation_app.set_setting("/app/useFabricSceneDelegate", True)
 simulation_app.set_setting("/app/usdrt/scene_delegate/enableProxyCubes", False)
 simulation_app.set_setting("/app/usdrt/scene_delegate/geometryStreaming/enabled", False)
 simulation_app.set_setting("/omnihydra/parallelHydraSprimSync", False)
-
 simulation_app.update()
 
 import omni.usd
@@ -49,22 +28,10 @@ import warp as wp
 from earth import EarthScene
 
 # Create a sim world
-world = EarthScene(stage_units_in_meters=1.0, physics_dt=1/60, rendering_dt=1/60, backend="warp", device="cuda")
+world = EarthScene(stage_units_in_meters=1.0, physics_dt=1/60, rendering_dt=1/60, backend="numpy", device="cuda")
 
 # Reset world (this sets simulation to 'playing' state)
 world.reset()
-
-# groups = [
-#         ("cubesat",     Gf.Vec3f(1, 0, 0)),
-#         ("gnss",        Gf.Vec3f(0, 1, 0)),
-#         ("geo",         Gf.Vec3f(1, 1, 0)),
-#         ("starlink",    Gf.Vec3f(48/255, 1, 1)),
-#         ("iridium-NEXT",    Gf.Vec3f(1, 0, 1)), 
-#         #("active", Gf.Vec3f(48/255, 1, 1))    
-#     ]
-# world.loadSatellites(groups)
-
-
 
 import omni.ui as ui
 window = ui.Window("Viewport")
