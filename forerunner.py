@@ -36,7 +36,8 @@ while simulation_app.is_running():
 
     # Let camera orbit
     #world.updateCameraOrbit(world.current_time, distance=cameraDistance, speed=10)
-    #world.updateCameraFollowSatellite(world.satellites[0], 300.)
+    if gui.selectedSat != None:        
+        world.updateCameraFollowSatellite(gui.selectedSatIdx, 1000.)
 
     # Update UI
     gui.updateSimulationInfo()

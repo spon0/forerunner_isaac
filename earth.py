@@ -48,7 +48,7 @@ class EarthScene(World):
         self.simTime : Time = None # type: ignore
 
         self.timestep = 0
-        self.speed = 25.0
+        self.speed = 50.0
         self.timestepsPerUpdate = 50
 
         # Get the stage
@@ -125,7 +125,7 @@ class EarthScene(World):
         cameraDistance = EarthScene.wgs84semiMajor * 5
 
         self.initializeCamera(cameraDistance)
-        self.loadSpaceTrack(30.0)
+        self.loadSpaceTrack(7.0)
         self.initializeSatellitesGeoms()
 
     def getCameraPosition(self) -> wp.vec3:
@@ -143,7 +143,7 @@ class EarthScene(World):
         if len(self.satellites) > 0:
             # Update any pos/vel for whose turn it is
             for i, sat in enumerate(self.satellites):
-                if self.timestep % self.timestepsPerUpdate == sat.updateIdx:                
+                if self.timestep % self.timestepsPerUpdate == sat.updateIdx or sat.selected:
                     geocentric = sat.at(self.simTime)
                     self.satPositions[i,:] = geocentric.xyz.km
                     self.satVelocities[i, :] = geocentric.velocity.km_per_s * self.speed
@@ -178,6 +178,31 @@ class EarthScene(World):
 
         return super().step(render, step_sim)
 
+    def initializeSatellitesFromTles(self, tles):
+        ts = load.timescale()
+        for tle in tles:
+            sat = EarthSatellite(line1=tle['TLE_LINE1'], line2=tle['TLE_LINE2'], name=tle['OBJECT_NAME'], ts=ts)
+            sat.color = EarthScene.SATTYPE_COLOR_MAPPING[tle['OBJECT_TYPE']]
+            geocentric = sat.at(self.simEpoch)
+            sat.pos = geocentric.xyz.km
+            sat.vel = geocentric.velocity.km_per_s * self.speed
+            sat.id = tle['NORAD_CAT_ID'].rjust(5, '0')
+            sat.selected = False
+            self.satellites.append(sat)
+
+    def initializeSatellitesFromOmms(self, ommData):
+        ts = load.timescale()
+        for fields in ommData:
+            print(fields)
+            sat = EarthSatellite.from_omm(ts, fields)
+            sat.color = group[1] # type: ignore
+            geocentric = sat.at(self.simEpoch)
+            sat.pos = geocentric.xyz.km
+            sat.vel = geocentric.velocity.km_per_s * self.speed
+            #sat.id = tle['NORAD_CAT_ID'].rjust(5, '0')
+            sat.selected = False
+            self.satellites.append(sat)
+        
     def loadSpaceTrack(self, maxDaysOld: float=7.0):
 
         import requests
@@ -208,14 +233,7 @@ class EarthScene(World):
             tles = json.load(open(backupTles))
 
         print("Received", len(tles), "TLEs")
-        ts = load.timescale()
-        for tle in tles:
-            sat = EarthSatellite(line1=tle['TLE_LINE1'], line2=tle['TLE_LINE2'], name=tle['OBJECT_NAME'], ts=ts)
-            sat.color = EarthScene.SATTYPE_COLOR_MAPPING[tle['OBJECT_TYPE']]
-            geocentric = sat.at(self.simEpoch)
-            sat.pos = geocentric.xyz.km
-            sat.vel = geocentric.velocity.km_per_s * self.speed
-            self.satellites.append(sat)
+        self.initializeSatellitesFromTles(tles=tles)
 
     def loadCelesTrack(self, groups : list[tuple[str, list]], maxDaysOld : float = 7.0):
 
@@ -232,24 +250,8 @@ class EarthScene(World):
             with load.open(name) as f:
                 data = json.load(f)
 
-                ts = load.timescale()
-                for fields in data:
-                    sat = EarthSatellite.from_omm(ts, fields)
-                    sat.color = group[1] # type: ignore
-                    geocentric = sat.at(self.simEpoch)
-                    sat.pos = geocentric.xyz.km
-                    sat.vel = geocentric.velocity.km_per_s * self.speed
-                    # Ensure we don't intialize duplicates
-                    if sat.model.satnum in sscs:
-                        continue
-                    else:
-                        sscs.add(sat.model.satnum)
-                    satGroup.append(sat)
-
-                print('Loaded', group[0], len(satGroup), 'satellites')
-
-                self.satellites.extend(satGroup)
-
+                self.initializeSatellitesFromOmms(ommData=data)
+                
     def initializeSatellitesGeoms(self):
         protoPath = "/World/Prototypes/Sphere"
         protoPrim = UsdGeom.Sphere.Define(omni.usd.get_context().get_stage(), protoPath)
@@ -303,7 +305,7 @@ class EarthScene(World):
         prim_path = "/OmniverseKit_Persp"
 
         self.cameraPrim = Camera(prim_path=prim_path)
-        self.cameraPrim.set_clipping_range(100.0, EarthScene.wgs84semiMajor * 50)
+        self.cameraPrim.set_clipping_range(10.0, EarthScene.wgs84semiMajor * 50)
         
         angle = 0
         base = [1, 0, 0]
@@ -347,14 +349,40 @@ class EarthScene(World):
             eye=[x,y,z], target=[0., 0., 0.], camera_prim_path=prim_path
         )
 
-    def updateCameraFollowSatellite(self, sat:EarthSatellite, distance: float):
+    def updateCameraFollowSatellite(self, satIdx: int, distance: float):
         prim_path = "/OmniverseKit_Persp"
 
-        eye = sat.pos - (sat.vel * distance)
+        # pos, vel = self.satPositions[satIdx], self.satVelocities[satIdx]
+        # eye = pos - (vel * distance)
+
+        target = self.satPositions[satIdx]
+        eye = target + (target / np.linalg.norm(target) * distance)
+
+        # camera = omni.usd.get_context().get_stage().GetPrimAtPath(prim_path)        
+        # world_transform_matrix = omni.usd.get_world_transform_matrix(camera)
+        # print(world_transform_matrix)
+        # ori = world_transform_matrix.ExtractRotation()
+        # print(ori)
+
+        # xform = UsdGeom.Xformable(camera)
+        
+        # new_rotation_eulers = [90.0, 0.0, 0.0] # X, Y, Z angles in degrees
+
+        # omni.kit.commands.execute(
+        #     "TransformMultiPrimsSRTCpp",
+        #     count=1,
+        #     paths=[prim_path],
+        #     new_rotation_eulers=[new_rotation_eulers],
+        #     # Add other transform properties like position and scale if needed
+        #     new_translations=[eye],
+        #     new_scales=[[1.0, 1.0, 1.0]],
+        #     time_code=0.0
+        # )
 
         set_camera_view(
-            eye=eye, target=sat.pos, camera_prim_path=prim_path
+            eye=eye, target=target, camera_prim_path=prim_path
         )
+
 
     def getSunPosition(self, time: Time) -> Gf.Vec3d:
         apparent = self.earth.at(time).observe(self.sun).apparent()
