@@ -78,7 +78,8 @@ class ForerunnerUI():
 
         if selected_item == ForerunnerUI.EMPTY_COMBO_VAL:
             self.selectedSat.selected = False
-            self.selectedSat = None            
+            self.selectedSat = None
+            self.sim.clearOrbitCurve()        
 
         # Get norad cat id and set selectedSat
         ssc = selected_item[-5:]
@@ -87,12 +88,13 @@ class ForerunnerUI():
                 sat.selected = True
                 self.selectedSat = sat
                 self.selectedSatIdx = i
+                self.sim.showOrbitCurve(sat)
                 return
 
     def createSelectSatWindow(self) -> ui.Window:
         # Run the build_ui function to display the UI
         omni.kit.app.get_app().get_extension_manager().set_extension_enabled_immediate("omni.kit.widget.searchable_combobox", True)
-        satelliteSelectWindow = ui.Window("Satellite", width=300, height=100)
+        satelliteSelectWindow = ui.Window("Satellite Selection", width=300, height=100)
         with satelliteSelectWindow.frame:
             with ui.VStack():
                 # Define the list of items for the combo box

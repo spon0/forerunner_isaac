@@ -16,7 +16,7 @@ import isaacsim.core.utils.prims as prim_utils
 # from isaacsim.core.prims import XFormPrim
 from isaacsim.core.utils.viewports import set_camera_view
 from omni.physx.scripts import physicsUtils
-from pxr import Sdf, UsdLux, UsdGeom, Gf, UsdPhysics, Vt
+from pxr import Sdf, UsdLux, UsdGeom, Gf, UsdPhysics, Vt, Usd
 
 from skyfield.api import EarthSatellite, load, Timescale, Time, Distance
 from skyfield import framelib
@@ -36,7 +36,7 @@ class EarthScene(World):
     }
 
     def __init__(self, physics_dt: float | None = None, rendering_dt: float | None = None, stage_units_in_meters: float | None = None, physics_prim_path: str = "/physicsScene", sim_params: dict = None, set_defaults: bool = True, backend: str = "numpy", device: str | None = None) -> None:
-        super().__init__(physics_dt, rendering_dt, stage_units_in_meters, physics_prim_path, sim_params, set_defaults, backend, device)
+        
 
         # Initialize empty list of space objects to simulate
         self.satellites : list[EarthSatellite] = []
@@ -53,16 +53,38 @@ class EarthScene(World):
 
         # Get the stage
         stage = omni.usd.get_context().get_stage()
+        self._stage = stage
 
         # scaling factor determined to be 20 based on original earth.usd having a bounding box of:
         # [(-10.003646850585938, -10.021764755249023, -10.020329475402832)...(10.003656387329102, 10.02176570892334, 10.020326614379883)]
         scalingFactor = 10.02
 
         usd_file = "earth.usd"
+        #usd_file = "D:\\Projects\\SpaceInteractions\\Earth2\\earth2-weather-analytics\\e2cc\\source\\extensions\\omni.earth_2_command_center.app.globe_view\\data\\dynamic_texture_tests\\test_002\\test_002.usda"
+        #usd_file = "D:\\Projects\\SpaceInteractions\\Earth2\\earth2-weather-analytics\\e2cc\\source\\extensions\\omni.earth_2_command_center.app.globe_view\\data\\stages\\diamond_globe_2.usd"
         script_path = os.path.dirname(os.path.abspath(__file__))
         usd_path = os.path.join(script_path, usd_file)
+        #stage = Usd.Stage.CreateNew(usd_file)
 
+        
+        # Get the USD context
+        # usd_context = omni.usd.get_context()
+        # # Open the USD stage
+        # result = usd_context.open_stage(usd_file)
+        # stage = usd_context.get_stage()
+        # print(f"Opened stage {stage} with result {result}")
+
+        super().__init__(physics_dt, rendering_dt, stage_units_in_meters, physics_prim_path, sim_params, set_defaults, backend, device)
         #omni.usd.get_context().open_stage(usd_path)
+        # bb = omni.usd.get_context().compute_path_world_bounding_box(usd_path)
+        # print(bb)
+
+        # globe_xform = UsdGeom.Xform(stage.GetPrimAtPath(Sdf.Path('/World/earth_xform/diamond_globe')))
+        # if globe_xform:
+        #     scale_attr = globe_xform.GetPrim().GetAttribute('xformOp:scale')
+        #     if scale_attr:
+        #         scale = scale_attr.Get()
+        #         print(f'Setting Earth Radius to: {scale[0]}')
 
         omni.kit.commands.execute(
             "IsaacSimSpawnPrim",
@@ -74,19 +96,18 @@ class EarthScene(World):
 
         omni.kit.commands.execute(
             "IsaacSimScalePrim",
-            prim_path="/World/earth",
-            scale=(EarthScene.wgs84semiMajor / scalingFactor, EarthScene.wgs84semiMajor / scalingFactor, EarthScene.wgs84semiMinor / scalingFactor)
+            prim_path='/World/earth',
+            scale=(EarthScene.wgs84semiMajor/scalingFactor, EarthScene.wgs84semiMajor/scalingFactor, EarthScene.wgs84semiMinor/scalingFactor)
         )
         success = stage.GetPrimAtPath("/World/earth").GetAttribute("xformOp:orient").Set(Gf.Quatd(0.5, 0.5, 0.5, 0.5), 0)
         print("Changed the rotation of the prim: ", success)
-
-        # Create the sun
 
         eph = load('de421.bsp')
         self.sun = eph['sun']
         self.earth = eph['earth']
         self.sunDist = EarthScene.wgs84semiMajor * 50
-
+        
+        # Create the sun
         sunPos = self.getSunPosition(self.simEpoch)
         sunPrim = prim_utils.create_prim(
             "/World/SunLight/Sun",
@@ -120,8 +141,7 @@ class EarthScene(World):
         # Example: Set intensity
         domeLight.CreateIntensityAttr(10)
 
-        # bb = omni.usd.get_context().compute_path_world_bounding_box(usd_path)
-        # print(bb)
+        
         cameraDistance = EarthScene.wgs84semiMajor * 5
 
         self.initializeCamera(cameraDistance)
@@ -392,6 +412,35 @@ class EarthScene(World):
         v = v / np.linalg.norm(v) * self.sunDist
 
         return Gf.Vec3d(v[0], v[1], v[2])
+    
+    def showOrbitCurve(self, sat) -> None:
+
+        points = []
+        widths = []
+        times = np.linspace(0, 120 * 60.0 , 360)
+        for t in times:
+            pos = sat.at(self.simTime + (t/86400)).xyz.km
+            points.append(Gf.Vec3f(pos[0], pos[1], pos[2]))
+            widths.append(10.0)
+
+        curve_path = "/World/orbit/curve"
+        curve = UsdGeom.NurbsCurves.Define(self._stage, curve_path)
+
+        # Set the points attribute
+        curve.CreatePointsAttr().Set(Vt.Vec3fArray(points))
+
+        # Set the widths
+        curve.CreateWidthsAttr(Vt.FloatArray(widths))
+
+        # Set the color
+        curve.CreateDisplayColorAttr(Vt.Vec3fArray(1, Gf.Vec3f(1.0, 1.0, 0.0)), writeSparsely=False)
+
+        # Set the curve vertex counts attribute
+        curve.CreateCurveVertexCountsAttr().Set([len(points)])
+
+    def clearOrbitCurve(self) -> None:
+        self._stage.RemovePrim("/World/orbit/curve")
+
     
 @wp.kernel
 def sgp4kernel(pos: wp.array(dtype=wp.vec3), vel: wp.array(dtype=wp.vec3), s: float, out: wp.array(dtype=wp.vec3)): # type: ignore
