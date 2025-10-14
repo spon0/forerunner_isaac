@@ -10,6 +10,7 @@ FR_EXPERIENCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'foreru
 simulation_app = SimulationApp(launch_config={'headless': False}, experience=FR_EXPERIENCE)
 #simulation_app.set_setting("/app/useFabricSceneDelegate", True)
 simulation_app.set_setting("persistent/app/viewport/displayOptions", 0)
+simulation_app.set_setting("/rtx/post/dlss/execMode", 2)
 simulation_app.update()
 
 from earth import EarthScene
@@ -33,8 +34,8 @@ while simulation_app.is_running():
 
     # Let camera orbit
     #world.updateCameraOrbit(world.current_time, distance=cameraDistance, speed=10)
-    #if gui.selectedSat != None:        
-    #    world.updateCameraFollowSatellite(gui.selectedSatIdx, 5000.)
+    if gui.selectedSat != None:        
+        world.updateCameraFollowSatellite(gui.selectedSatIdx, 30.)
 
     # Update UI
     gui.updateSimulationInfo()

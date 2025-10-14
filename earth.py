@@ -15,7 +15,10 @@ from isaacsim.sensors.camera import Camera
 import isaacsim.core.utils.prims as prim_utils
 # from isaacsim.core.prims import XFormPrim
 from isaacsim.core.utils.viewports import set_camera_view
+from isaacsim.core.utils.rotations import lookat_to_quatf
 from omni.physx.scripts import physicsUtils
+from omni.kit.viewport.utility import get_active_viewport
+from omni.kit.viewport.utility.camera_state import ViewportCameraState
 from pxr import Sdf, UsdLux, UsdGeom, Gf, UsdPhysics, Vt, Usd
 
 from skyfield.api import EarthSatellite, load, Timescale, Time, Distance
@@ -50,6 +53,8 @@ class EarthScene(World):
         self.timestep = 0
         self.speed = 50.0
         self.timestepsPerUpdate = 50
+
+        self.cameraRot = 0.0
 
         # Get the stage
         stage = omni.usd.get_context().get_stage()
@@ -131,7 +136,7 @@ class EarthScene(World):
         self.satVelocities : np.ndarray = None
         self.satScales : np.ndarray = None
         self.cameraPrim : Camera = None
-        self.satDistanceScaler : float = 0.00012
+        self.satDistanceScaler : float = 0.00008
 
         # Define the prim path for the Dome Light
         domeLightPrimPath = Sdf.Path("/World/DomeLight")
@@ -159,6 +164,7 @@ class EarthScene(World):
 
         secPerDay = 86400
         self.simTime = self.simEpoch + (self.current_time * self.speed / secPerDay)
+        selectedSatelliteIdx = None
 
         if len(self.satellites) > 0:
             # Update any pos/vel for whose turn it is
@@ -167,6 +173,7 @@ class EarthScene(World):
                     geocentric = sat.at(self.simTime)
                     self.satPositions[i,:] = geocentric.xyz.km
                     self.satVelocities[i, :] = geocentric.velocity.km_per_s * self.speed
+                    if sat.selected: selectedSatelliteIdx = i
 
 
             # Get dimension for warp kernel
@@ -188,6 +195,11 @@ class EarthScene(World):
 
             wp.launch(cameraDistKernel, dim=n, inputs=[pos, self.getCameraPosition(), self.satDistanceScaler, scalesOut], device="cuda")
             self.satScales = scalesOut.numpy()
+            
+            # if the user has a seleceted satellite, 4x the scale
+            if selectedSatelliteIdx != None:
+                self.satScales[selectedSatelliteIdx] *= 4
+
             self.satellitesPrim.GetScalesAttr().Set(self.satScales)
 
         # Update sun position
@@ -369,40 +381,48 @@ class EarthScene(World):
             eye=[x,y,z], target=[0., 0., 0.], camera_prim_path=prim_path
         )
 
-    def updateCameraFollowSatellite(self, satIdx: int, distance: float):
-        prim_path = "/OmniverseKit_Persp"
-
-        # pos, vel = self.satPositions[satIdx], self.satVelocities[satIdx]
-        # eye = pos - (vel * distance)
-
-        target = self.satPositions[satIdx]
-        eye = target + (target / np.linalg.norm(target) * distance)
-
-        # camera = omni.usd.get_context().get_stage().GetPrimAtPath(prim_path)        
-        # world_transform_matrix = omni.usd.get_world_transform_matrix(camera)
-        # print(world_transform_matrix)
-        # ori = world_transform_matrix.ExtractRotation()
-        # print(ori)
-
-        # xform = UsdGeom.Xformable(camera)
+    def updateCameraFollowSatellite(self, satIdx: int, distance: float, prim_path: str = "/OmniverseKit_Persp"):
         
-        # new_rotation_eulers = [90.0, 0.0, 0.0] # X, Y, Z angles in degrees
+        camera = self._stage.GetPrimAtPath(prim_path)
+        viewport_api = get_active_viewport()
+        
+        pos, vel = self.satPositions[satIdx], self.satVelocities[satIdx]
+        eye = pos - (vel * distance)
 
-        # omni.kit.commands.execute(
-        #     "TransformMultiPrimsSRTCpp",
-        #     count=1,
-        #     paths=[prim_path],
-        #     new_rotation_eulers=[new_rotation_eulers],
-        #     # Add other transform properties like position and scale if needed
-        #     new_translations=[eye],
-        #     new_scales=[[1.0, 1.0, 1.0]],
-        #     time_code=0.0
+        camera_position = np.asarray(eye, dtype=np.double)
+
+        # set camera prim position
+        camera_state = ViewportCameraState(prim_path, viewport_api)
+        camera_state.set_position_world(Gf.Vec3d(camera_position[0], camera_position[1], camera_position[2]), True)
+
+        #pos, vel = self.satPositions[satIdx], self.satVelocities[satIdx]
+        #eye = pos - (vel * distance)
+
+        #target = self.satPositions[satIdx]
+        # eye = target + (target / np.linalg.norm(target) * distance)
+
+        
+        # world_transform_matrix = omni.usd.get_world_transform_matrix(camera)
+        # world_transform_matrix.SetTranslateOnly(Gf.Vec3d(float(pos[0]), float(pos[1]), float(pos[2])))
+        #orient = lookat_to_quatf(target, pos, Gf.Vec3d(0, 0, 1))
+        #mat = Gf.Matrix4d().SetRotateOnly(orient).SetTranslateOnly(pos)        
+        #mat = Gf.Matrix4d().SetTranslateOnly(pos)        
+        #camera.GetAttribute("xformOp:transform").Set(world_transform_matrix)
+
+        # set_camera_view(
+        #     eye=eye, target=target, camera_prim_path=prim_path
         # )
 
-        set_camera_view(
-            eye=eye, target=target, camera_prim_path=prim_path
-        )
+        # camera = self._stage.GetPrimAtPath(prim_path)
+        # # Get the xformable API for the camera prim
+        # xformable = UsdGeom.Xformable(camera)
 
+        # # Add a rotateX op to the camera prim
+        # rotate_op = xformable.AddRotateXOp()
+
+        # # Set the value of the rotateX op to 45 degrees
+        # rotate_op.Set(self.cameraRot)#Gf.Vec3f(45.0, 0.0, 0.0))
+        # self.cameraRot += 1.0
 
     def getSunPosition(self, time: Time) -> Gf.Vec3d:
         apparent = self.earth.at(time).observe(self.sun).apparent()
@@ -440,6 +460,7 @@ class EarthScene(World):
 
     def clearOrbitCurve(self) -> None:
         self._stage.RemovePrim("/World/orbit/curve")
+        self.sate
 
     
 @wp.kernel

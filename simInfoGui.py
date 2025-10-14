@@ -4,6 +4,7 @@ import carb
 import omni.ui as ui
 import omni.ui.scene as sc
 from omni.kit.viewport.utility import get_active_viewport_window
+from isaacsim.core.utils.viewports import set_camera_view
 import omni.kit.app
 from omni.kit.widget.searchable_combobox import build_searchable_combo_widget, ComboBoxListDelegate
 
@@ -79,6 +80,7 @@ class ForerunnerUI():
         if selected_item == ForerunnerUI.EMPTY_COMBO_VAL:
             self.selectedSat.selected = False
             self.selectedSat = None
+            self.selectedSatIdx = -1
             self.sim.clearOrbitCurve()        
 
         # Get norad cat id and set selectedSat
@@ -89,6 +91,16 @@ class ForerunnerUI():
                 self.selectedSat = sat
                 self.selectedSatIdx = i
                 self.sim.showOrbitCurve(sat)
+
+                # set initial camera tether
+                prim_path = "/OmniverseKit_Persp"
+                distance = 30.0
+                pos, vel = self.sim.satPositions[self.selectedSatIdx], self.sim.satVelocities[self.selectedSatIdx]
+                eye = pos - (vel * distance)
+                target = self.sim.satPositions[self.selectedSatIdx]
+                set_camera_view(
+                    eye=eye, target=target, camera_prim_path=prim_path
+                )
                 return
 
     def createSelectSatWindow(self) -> ui.Window:
